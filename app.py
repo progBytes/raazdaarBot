@@ -11,18 +11,28 @@ from cryptography.hazmat.backends import default_backend
 import base64
 import secrets
 import json  # For simple storage
+import asyncio
+
+logging.basicConfig(level=logging.INFO)
+logging.getLogger('telegram').setLevel(logging.ERROR)  # Reduce PTB noise
 
 app = Flask(__name__)
 TOKEN = '8532570108:AAFK4Rfzx0KLYIX75v3I_k-nRZThc1qPs9g'  # From BotFather
-bot = Bot(TOKEN)
-application = Application.builder().token(TOKEN).bot(bot).build()
+application = Application.builder().token(TOKEN).build()
+
+# Global flag to ensure init once
+_initialized = False
 
 # Simple storage (file-based, encrypted later if needed)
 STORAGE_FILE = 'bot_data.json'
 def load_data():
     if os.path.exists(STORAGE_FILE):
         with open(STORAGE_FILE, 'r') as f:
-            return json.load(f)
+            content = f.read().strip()
+            if content:
+                return json.loads(content)
+            else:
+                return {'active_pass': None, 'owner_id': None}
     return {'active_pass': None, 'owner_id': None}
 
 def save_data(data):
@@ -70,6 +80,7 @@ async def is_owner(user_id):
 
 # Start command
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    print("Start handler triggered!")  # Debug - remove later
     user_id = update.effective_user.id
     if await is_owner(user_id):
         keyboard = [[InlineKeyboardButton("🔐 Set Master Pass", callback_data="set_pass")]]
@@ -80,8 +91,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Button callbacks
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    print("Button handler triggered!")  # Debug - remove later
     query = update.callback_query
-    await query.answer()
+    try:
+        await query.answer()
+    except Exception as e:
+        logging.exception("Failed to answer callback_query: %s", e)
     user_id = query.from_user.id
     data_ = query.data
 
@@ -94,8 +109,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     elif data_ == "encrypt_this":
-        # Assume this is triggered after message - store msg_id in context or pass via data
-        # For simplicity, we'll use force reply in message handler
         await query.edit_message_text("🔒 Confirm pass to lock:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Cancel", callback_data="cancel")]]))
         context.user_data['waiting_for'] = 'confirm_encrypt'
         return
@@ -105,10 +118,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['waiting_for'] = 'unlock_pass'
         return
 
-    # Add more as needed
-
 # Message handler for plaintext (auto-button) and force replies
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    print("Message handler triggered!")  # Debug - remove later
     user_id = update.effective_user.id
     msg_text = update.message.text
     if context.user_data.get('waiting_for') == 'set_pass':
@@ -123,12 +135,13 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get('waiting_for') == 'confirm_encrypt':
         pass_confirm = msg_text
         if data['active_pass'] and pass_confirm == data['active_pass']:
-            # Get the original message - for demo, assume last msg or pass msg_id
-            # Simplified: Encrypt a placeholder
+            # Simplified encrypt for test - use original msg from context if needed
             encrypted, _ = encrypt_message("Demo secret", data['active_pass'])
             packet_text = f"🔒 Secure Packet [ID:{secrets.randbits(16)}]"
             await update.message.reply_text(packet_text)
-            await update.message.reply_text("✅ Locked!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔓 Unlock", callback_data="unlock_packet")]]))
+            keyboard = [[InlineKeyboardButton("🔓 Unlock", callback_data="unlock_packet")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await update.message.reply_text("✅ Locked!", reply_markup=reply_markup)
         else:
             await update.message.reply_text("❌ Pass mismatch.")
         context.user_data['waiting_for'] = None
@@ -140,7 +153,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text("Want to lock this?", reply_markup=reply_markup)
 
-# For packets - detect in message handler if starts with 🔒
+    # For packets - detect in message handler if starts with 🔒
     if msg_text and msg_text.startswith('🔒'):
         keyboard = [[InlineKeyboardButton("🔓 Unlock Packet", callback_data="unlock_packet")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -151,19 +164,38 @@ application.add_handler(CommandHandler("start", start))
 application.add_handler(CallbackQueryHandler(button_handler))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
 
-# Webhook
+# One-time initialization (sync wrapper for WSGI module load)
+def initialize_application():
+    global _initialized
+    if not _initialized:
+        try:
+            asyncio.run(application.initialize())
+            asyncio.run(application.start())
+            _initialized = True
+            print("PTB Application initialized and started!")  # Debug - remove later
+        except Exception as e:
+            logging.exception("Failed to initialize PTB: %s", e)
+
+initialize_application()
+
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    update = Update.de_json(request.get_json(), bot)
-    application.process_update(update)
-    return 'OK'
+    """Safe webhook wrapper: logs full exceptions so we can see why Telegram gets 500."""
+    update_json = request.get_json(silent=True)
+    logging.debug("Webhook received raw update: %s", update_json)
+    try:
+        update = Update.de_json(update_json, application.bot)
+        # Run async processing in a new event loop (sync WSGI fix)
+        asyncio.run(application.process_update(update))
+        return 'OK', 200
+    except Exception as e:
+        logging.exception("Unhandled exception while handling /webhook: %s", e)
+        return 'Internal Server Error', 500
 
 @app.route('/')
 def index():
-    return "razdar alive! Set webhook to /webhook."
+    return "SecureSenderBot alive! Webhook ready."
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
-
-    
