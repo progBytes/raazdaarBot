@@ -1,21 +1,11 @@
 {
-    "master_pass": "kir",
+    "master_enc_pass": "mD7j3BFYq7IaJobWj9pa9ev9wXXaqyWAuaaFA7Gvqg==",
     "owner_id": 6677925259,
     "users": {
         "6677925259": {
             "tries": 0,
             "authenticated": true
-        },
-        "6677925259": {
-            "tries": 0,
-            "authenticated": true
         }
     },
-    "dummies": {
-        "6677925259": {
-            "191": "/mq3fsiygwAYB76ZkwnzCJLinUtAhwehX9f5wbT27Bv0a1as8ImLbfwcsb9S",
-            "193": "4m2lZmVhjzFyJ49UwbYqkhb+ig==",
-            "195": "4mukbbj1XHsHajIqZtuO8RLT5w=="
-        }
-    }
+    "dummies": {}
 }

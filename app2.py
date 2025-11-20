@@ -22,13 +22,18 @@ def load_data():
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, 'r') as f:
             return json.load(f)
-    return {'master_pass': None, 'owner_id': None, 'users': {}, 'dummies': {}} # Default structure with dummies
+    return {'master_enc_pass': None, 'owner_id': None, 'users': {}, 'dummies': {}} # Default structure with dummies
 # Save data to JSON
 def save_data(data):
     with open(DATA_FILE, 'w') as f:
         json.dump(data, f, indent=4)
 # Load data at startup
 data = load_data()
+
+# NEW: Fixed storage key for encrypting master_pass (generate your own: os.urandom(32))
+STORAGE_KEY = bytes.fromhex('7d46a385a8841119e030235a32ed570516247e209d8e9ece13a3e0a660be867c')  # 32 bytes, secure random example
+master_plain_cache = [None]  # Mutable list for global cache (None or str)
+
 # Crypto helpers -----------------------
 def derive_key(password: str):
     salt = b'saltysalt123' # Fixed for demo; randomize in prod
@@ -50,6 +55,36 @@ def decrypt_message(encrypted: str, password: str):
         return plaintext
     except:
         return None # Wrong pass/key
+    
+
+# NEW: Encrypt/decrypt master_pass for secure storage (uses fixed STORAGE_KEY)
+def encrypt_storage_pass(plain: str, key: bytes) -> str:
+    aesgcm = AESGCM(key)
+    nonce = os.urandom(12)  # Random nonce for security
+    ct = aesgcm.encrypt(nonce, plain.encode(), None)
+    return base64.b64encode(nonce + ct).decode('utf-8')
+
+def decrypt_storage_pass(enc: str, key: bytes) -> str:
+    try:
+        data = base64.b64decode(enc)
+        nonce = data[:12]
+        ct = data[12:]
+        aesgcm = AESGCM(key)
+        return aesgcm.decrypt(nonce, ct, None).decode('utf-8')
+    except:
+        return None  # Fail silently (wrong key/enc)
+
+def get_master_plain() -> str | None:
+    if master_plain_cache[0] is None and data.get('master_enc_pass'):
+        plain = decrypt_storage_pass(data['master_enc_pass'], STORAGE_KEY)
+        if plain:
+            master_plain_cache[0] = plain
+        else:
+            logger.error("Failed to decrypt master_pass - check STORAGE_KEY?")
+    return master_plain_cache[0]
+
+
+
 # START COMMAND ------------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
@@ -60,7 +95,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Sent TYPING for /start from chat {chat_id}")
    
     # First-time setup check
-    if data['master_pass'] is None:
+    if data['master_enc_pass'] is None:
         if data['owner_id'] is None: # Truly fresh: This user becomes owner
             data['owner_id'] = chat_id # This user is owner
             data.setdefault('users', {})[chat_id] = {'tries': 0}
@@ -110,7 +145,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         chat_dummies = data.get('dummies', {}).get(str(chat_id), {})
         if replied_msg_id in chat_dummies:
             encrypted = chat_dummies[replied_msg_id]
-            if text == data['master_pass']:
+            if text == get_master_plain():
                 # Correct passphrase: Decrypt, edit dummy to real, delete the passphrase reply (stealth)
                 real_msg = decrypt_message(encrypted, text)
                 if real_msg:
@@ -138,7 +173,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # NEW: Check for first-time setup (before auth logic)
     if context.user_data.get('awaiting_set_pass'):
-        data['master_pass'] = text
+        data['master_enc_pass'] = encrypt_storage_pass(text, STORAGE_KEY)
+        master_plain_cache[0] = text  # Cache the plain for runtime use
         users.setdefault(chat_id, {'tries': 0})
         users[chat_id]['authenticated'] = True  # Owner is auto-auth'd
         save_data(data)
@@ -148,20 +184,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"Set master pass for owner {chat_id}")
         await update.message.reply_text(msg + " (Future: Show menu here.)")
         return
-   
-    # Auth check (after setup)
-    # if chat_id in users and users[chat_id].get('authenticated', False):
-    #     # Post-auth: Encrypt & send plain dummy (no button!)
-    #     encrypted = encrypt_message(text, data['master_pass'])
-    #     dummy_text = "Hey there! 😊" # Plain text, looks innocent
-    #     msg = await update.message.reply_text(dummy_text)  # No reply_markup
-    #     # Store for reveal via reply
-    #     chat_dummies = data.setdefault('dummies', {}).setdefault(str(chat_id), {})
-    #     chat_dummies[msg.message_id] = encrypted
-    #     save_data(data)
-    #     logger.info(f"Sent dummy for msg in {chat_id}")
-    #     return
-   
 
     # Auth check (after setup)
     if chat_id in users and users[chat_id].get('authenticated', False):
@@ -172,8 +194,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logger.warning(f"Failed to delete sent msg in {chat_id}: {e}")  # Fallback: msg stays, but rare
         
+        master_plain = get_master_plain()
+        if not master_plain:
+            await context.bot.send_message(chat_id=chat_id, text="❌ Master pass unavailable - contact owner.")
+            return
+        encrypted = encrypt_message(text, master_plain)
         # Post-auth: Encrypt & send plain dummy (no button!) as "sent" placeholder
-        encrypted = encrypt_message(text, data['master_pass'])
+        encrypted = encrypt_message(text, get_master_plain() or '')
         dummy_text = "Hey there! 😊" # Plain text, looks innocent
         msg = await update.message.reply_text(dummy_text)  # Reply to deleted? Nah—reply_text without reply_to is fine, threads to chat
         # Store for reveal via reply
@@ -190,7 +217,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     users.setdefault(chat_id, {'tries': 0})
    
     # Auth attempt: Compare to saved master_pass
-    if text == data['master_pass']:
+    if text == get_master_plain():
         users[chat_id]['authenticated'] = True
         users[chat_id]['tries'] = 0
         save_data(data)
@@ -220,7 +247,7 @@ async def changepass_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return OLD_PASS # Go to OLD_PASS state
 async def get_old_pass(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
-    if text == data['master_pass']:
+    if text == get_master_plain():
         # NEW: Store old_pass in user_data for re-encryption later
         context.user_data['old_pass'] = text
         await update.message.reply_text("✅ Old pass correct. Now enter the new master passphrase:")
@@ -252,8 +279,11 @@ async def get_new_pass(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not ch_dummies:
                 del dummies[ch_str]
         save_data(data)  # Save re-encrypted dummies first
+        # NEW: Encrypt new pass for storage
+        data['master_enc_pass'] = encrypt_storage_pass(new_pass, STORAGE_KEY)
+        # Update cache with new plain
+        master_plain_cache[0] = new_pass
     # Update pass and invalidate auth
-    data['master_pass'] = new_pass
     for user in data.get('users', {}).values():
         user['authenticated'] = False # Force re-auth for everyone
     save_data(data)
