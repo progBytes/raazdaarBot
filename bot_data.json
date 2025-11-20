@@ -4,8 +4,18 @@
     "users": {
         "6677925259": {
             "tries": 0,
-            "authenticated": false
+            "authenticated": true
+        },
+        "6677925259": {
+            "tries": 0,
+            "authenticated": true
         }
     },
-    "dummies": {}
+    "dummies": {
+        "6677925259": {
+            "191": "/mq3fsiygwAYB76ZkwnzCJLinUtAhwehX9f5wbT27Bv0a1as8ImLbfwcsb9S",
+            "193": "4m2lZmVhjzFyJ49UwbYqkhb+ig==",
+            "195": "4mukbbj1XHsHajIqZtuO8RLT5w=="
+        }
+    }
 }

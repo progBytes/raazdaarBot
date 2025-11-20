@@ -11,6 +11,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.backends import default_backend
+import asyncio  # For safe async delete if needed (but sync works fine)
 # Enable logging to see bot activity/errors (helps debugging)
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -149,18 +150,42 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
    
     # Auth check (after setup)
+    # if chat_id in users and users[chat_id].get('authenticated', False):
+    #     # Post-auth: Encrypt & send plain dummy (no button!)
+    #     encrypted = encrypt_message(text, data['master_pass'])
+    #     dummy_text = "Hey there! 😊" # Plain text, looks innocent
+    #     msg = await update.message.reply_text(dummy_text)  # No reply_markup
+    #     # Store for reveal via reply
+    #     chat_dummies = data.setdefault('dummies', {}).setdefault(str(chat_id), {})
+    #     chat_dummies[msg.message_id] = encrypted
+    #     save_data(data)
+    #     logger.info(f"Sent dummy for msg in {chat_id}")
+    #     return
+   
+
+    # Auth check (after setup)
     if chat_id in users and users[chat_id].get('authenticated', False):
-        # Post-auth: Encrypt & send plain dummy (no button!)
+        # NEW: Silently delete the user's real sent message (hides "outgoing")
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=update.message.message_id)
+            logger.info(f"Deleted sent msg {update.message.message_id} in {chat_id}")
+        except Exception as e:
+            logger.warning(f"Failed to delete sent msg in {chat_id}: {e}")  # Fallback: msg stays, but rare
+        
+        # Post-auth: Encrypt & send plain dummy (no button!) as "sent" placeholder
         encrypted = encrypt_message(text, data['master_pass'])
         dummy_text = "Hey there! 😊" # Plain text, looks innocent
-        msg = await update.message.reply_text(dummy_text)  # No reply_markup
+        msg = await update.message.reply_text(dummy_text)  # Reply to deleted? Nah—reply_text without reply_to is fine, threads to chat
         # Store for reveal via reply
         chat_dummies = data.setdefault('dummies', {}).setdefault(str(chat_id), {})
         chat_dummies[msg.message_id] = encrypted
         save_data(data)
         logger.info(f"Sent dummy for msg in {chat_id}")
         return
-   
+
+
+
+
     # Ensure user entry
     users.setdefault(chat_id, {'tries': 0})
    
