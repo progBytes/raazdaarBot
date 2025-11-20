@@ -1,0 +1,11 @@
+{
+    "master_pass": "kir",
+    "owner_id": 6677925259,
+    "users": {
+        "6677925259": {
+            "tries": 0,
+            "authenticated": false
+        }
+    },
+    "dummies": {}
+}
