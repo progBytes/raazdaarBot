@@ -152,7 +152,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await context.bot.edit_message_text(
                         chat_id=chat_id,
                         message_id=replied_msg_id,
-                        text=f"{real_msg} ✨ Revealed!"
+                        text=f"{real_msg} ✨"
                     )
                     # Remove from storage
                     del chat_dummies[replied_msg_id]

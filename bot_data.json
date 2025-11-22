@@ -1,11 +1,23 @@
 {
-    "master_enc_pass": "mD7j3BFYq7IaJobWj9pa9ev9wXXaqyWAuaaFA7Gvqg==",
-    "owner_id": 6677925259,
-    "users": {
-        "6677925259": {
-            "tries": 0,
-            "authenticated": true
-        }
+    "user_passwords": {
+        "6677925259": "wk1GZjeYL8hUgjsygF7lQaT39sjhIPlj6DGZ6wNMAg=="
     },
-    "dummies": {}
+    "dummies": {
+        "6677925259": {
+            "260": {
+                "enc": "4mukbbj1XHsHajIqZtuO8RLT5w==",
+                "sender_id": 6677925259
+            },
+            "264": {
+                "enc": "4m2lZmVhjzFyJ49UwbYqkhb+ig==",
+                "sender_id": 6677925259
+            }
+        },
+        "-1003409224302": {
+            "6": {
+                "enc": "/mq3fs+nmxXVdic9ycXBbMTbm8KqJd3w",
+                "sender_id": 6677925259
+            }
+        }
+    }
 }
