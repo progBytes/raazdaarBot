@@ -20,10 +20,24 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.backends import default_backend
+import random
 
 # Enable logging to see bot activity/errors (helps debugging)
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+DUMMY_TEXTS = [
+    "Hey yoooo! 😊",
+    "What's up? brooo 👋",
+    "How's it going???? 🌟",
+    "Quick hellooooo! ☕",
+    "Chillin' here! 🛋️",
+    "Just dropped a meme 😂",
+    "Pizza cravings hit hard 🍕",
+    "Weekend vibes? 🏖️",
+    "This weather tho... 🌤️",
+    "Bored—anyone alive? 😴"
+]
 
 # JSON FILE STORE DATA ----------------- (UPDATED: per-user passes/auth, dummies per-chat with sender_id)
 DATA_FILE = 'bot_data.json' # Renamed for clarity
@@ -32,7 +46,7 @@ def load_data():
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, 'r') as f:
             return json.load(f)
-    return {'user_passwords': {}, 'dummies': {}} # UPDATED: No global pass/owner; users gone (auth via pass presence)
+    return {'user_passwords': {}, 'dummies': {}, 'active_msgs': {}} # UPDATED: No global pass/owner; users gone (auth via pass presence)
 
 # Save data to JSON
 def save_data(data):
@@ -204,11 +218,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(chat_id=chat_id, text="❌ Your passphrase unavailable - restart /start in private DM.")
             return
         encrypted = encrypt_message(text, sender_plain)
-        dummy_text = "Hey there! 😊" # Plain text, looks innocent
+        dummy_text = random.choice(DUMMY_TEXTS)
         msg = await context.bot.send_message(chat_id=chat_id, text=dummy_text)  # No reply_to needed
         # UPDATED: Store for reveal via reply (with sender_id)
         chat_dummies = data.setdefault('dummies', {}).setdefault(str(chat_id), {})
         chat_dummies[msg.message_id] = {'enc': encrypted, 'sender_id': user_id}
+        # NEW: Track active bot msgs for auto-trim (ordered list) (DELETE OLD MESSAGES)
+        chat_active = data.setdefault('active_msgs', {}).setdefault(str(chat_id), [])
+        chat_active.append(msg.message_id)
+        # NEW: Trim to last 2: Delete oldest if >2
+        if len(chat_active) > 2:
+            oldest_id = chat_active.pop(0)
+            try:
+                await context.bot.delete_message(chat_id=chat_id, message_id=oldest_id)
+                # Clean from dummies if still there (e.g., unrevealed)
+                if oldest_id in chat_dummies:
+                    del chat_dummies[oldest_id]
+                logger.info(f"Trimmed old msg {oldest_id} in {chat_id} to keep last 2")
+            except Exception as e:
+                logger.warning(f"Failed to trim old msg {oldest_id} in {chat_id}: {e}")
+                # Still pop from list to avoid stale tracking (END OF DELETE OLD)
         save_data(data)
         logger.info(f"Sent dummy for msg from {user_id} in {chat_id}")
         return
